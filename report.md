@@ -70,7 +70,7 @@ Re-ranking cannot recover information that the initial bi-encoder fails to retri
 | 1 – Baseline | 6.6 ms | – | 6.6 ms | ~1.56 s |
 | 2 – Re-ranking | 6.6 ms | 20.2 ms | 26.8 ms | ~1.76 s |
 
-I measured latency on the CPU after a warm-up run, using 20 runs for each of the five queries and averaging the results; the LLM time is the mean of the real Gemini calls. The re-ranking stage added 20.2 ms, increasing retrieval time from 6.6 ms to 26.8 ms, or roughly four times the baseline retrieval time. However, compared with the full request time of approximately 1.6 seconds, the additional cost was only around 1–1.3%. This suggests that re-ranking can improve answer quality with little noticeable increase in end-to-end latency. The difference between the measured LLM times is attributable to API and network variation, rather than an inherent slowdown caused by re-ranking.
+I measured latency on the CPU after a warm-up run, using 20 runs for each of the five queries and averaging the results; the LLM time is the mean of the real Gemini calls. The re-ranking stage added 20.2 ms, increasing retrieval time from 6.6 ms to 26.8 ms, or roughly four times the baseline retrieval time. However, compared with the full request time of approximately 1.6 seconds, the additional cost was only around 1–1.3%. This suggests that re-ranking can improve answer quality with little noticeable increase in end-to-end latency. The difference between the measured LLM times is most likely due to API and network variation, rather than an inherent slowdown caused by re-ranking.
 
 ---
 
