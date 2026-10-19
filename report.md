@@ -18,15 +18,9 @@
 
 ## 1. Architecture Comparison
 
-✍️ *Write 1–2 short paragraphs in your own words.*
+The bi-encoder processes the query and each document chunk separately. It converts each input into a 384-dimensional vector, and their relevance is calculated using cosine similarity. Since the vectors are normalised, FAISS's inner product gives the same result as cosine similarity. An important advantage is that the chunk vectors can be generated and stored before a query arrives, making retrieval fast. However, the model compresses an entire chunk into a single vector without directly comparing it with the query. As a result, it can prioritise chunks that share similar words even when they do not answer the question. Small but important differences, such as the word "not" or an exception to a rule, can easily be overlooked.
 
-Notes:
-- Bi-encoder: query and chunk encoded **separately** → one vector each → cosine similarity.
-- Chunk vectors are computed once, offline; a query costs one encoding plus an index search.
-- Whole chunk squeezed into one vector → small qualifiers ("not", "except", "shall not be required") barely move it; topic overlap dominates.
-- Cross-encoder: query and chunk fed **together** (`[CLS] query [SEP] chunk [SEP]`); self-attention connects every query token with every chunk token.
-- Outputs one relevance score (a logit, so only the order matters); nothing can be precomputed.
-- Both models are 6-layer MiniLM → the difference comes from the architecture, not size.
+The cross-encoder takes the query and a chunk together as a single input. This allows each query token to interact with the chunk's tokens through self-attention, helping the model distinguish between statements that discuss the same topic but have different meanings. For example, it can better match a question about when a company is not required to notify affected people with the corresponding legal exception. Instead of producing separate vectors, it returns a relevance score for each query–chunk pair. These scores are useful for ranking candidates, rather than as absolute measures of relevance. The drawback is that each pair requires a separate model pass, so the computation cannot be completed in advance. Both models use six-layer MiniLM architectures, meaning the main difference in this experiment is how they process the inputs, rather than their size.
 
 ---
 
@@ -52,22 +46,16 @@ Notes:
 | 4 | "May designate… shall where required by law" | Gives mandatory large-scale condition | Misstated rule |
 | 5 | Correct | Correct | None (control) |
 
-✍️ *Write a short paragraph per query (or one combined paragraph) describing what moved and why it mattered.*
+* The baseline retrieved chunks 195 and 196 among its top results. These discussed the monitoring and enforcement activities of supervisory authorities rather than an employer monitoring employees. The word "monitoring" created a strong topical match, even though the passages addressed a different question. The relevant chunk 562, covering Article 88, was already ranked third by the bi-encoder and moved to first after re-ranking. Both answers were correct, although the baseline included two irrelevant chunks among its three retrieved passages. This example shows that the baseline did not always produce a wrong answer, but its retrieval quality could still be improved. The bi-encoder scores were also tightly grouped between 0.315 and 0.367, making it difficult to distinguish the relevant passage from the distractors.
+* The baseline's top three results focused on the circumstances in which personal data can be erased, including Article 17(1) and the beginning of Recital 65. These passages matched the deletion aspect of the question but did not adequately address the refusal conditions. Consequently, Answer 1 listed grounds for erasure without explaining when a company could refuse the request, omitting an essential clause. The relevant chunk 99, from Recital 65, moved from sixth to first after re-ranking. Answer 2 then listed all five refusal grounds. This was a clear improvement because the cross-encoder considered the relationship between the question and the passage instead of relying mainly on their shared topic.
+* The baseline retrieved passages about reporting breaches to supervisory authorities under Article 33 and the general consequences of breaches discussed in Recitals 85–87. These passages were relevant to breach reporting in general, but they did not directly answer the question about exceptions to notifying affected individuals. Answer 1 therefore stated that the context did not list the exceptions, omitting an essential clause. Chunk 378, covering Article 34(3), moved from sixth to second after re-ranking. Answer 2 identified the exceptions concerning encryption and subsequent measures that make the high risk unlikely to materialise. However, it still missed the third exception because that part of the provision fell outside the retrieved chunk.
+* The baseline retrieved passages about data protection officer (DPO) responsibilities and appointment provisions that made the requirement appear optional. Answer 1 stated that a company "may designate" a DPO unless required by law, which did not adequately explain the conditions under which appointment is mandatory. Chunk 392, covering Article 37(1)(c), moved from seventh to first after re-ranking. Answer 2 gave a more useful explanation of the conditions involving large-scale processing of special categories of personal data. Nevertheless, the answer remained incomplete because the other relevant conditions in Article 37(1)(a) and (b) were not included among the final three chunks.
 
-Notes:
-- Q1: baseline #1 and #2 (chunks 195, 196) are about supervisory authorities' "monitoring and enforcement", a lexical match but the wrong topic. Bi-encoder scores for all 10 sit between 0.315 and 0.367; the cross-encoder spread them from −5.8 to −11.2.
-- Q2: baseline top 3 were all about when you *can* erase (Art. 17(1), start of Recital 65).
-- Q3: baseline pulled Art. 33 (notifying the *authority*) and Recitals 85–87, which match the topic but not the negation.
-- Q4: baseline top 3 were Art. 37(4) and Art. 38 (DPO tasks), which made the DPO sound optional.
-- No outright hallucination: the "answer only from context" prompt made the LLM say "not in context" instead of inventing rules, so failures show up as omissions or misstatements.
+#### Cross-cutting observations
+Across these queries, re-ranking improved the ordering of passages that were already retrieved, particularly when the question depended on negation, exceptions or a specific legal condition. The cross-encoder produced a much wider score spread than the bi-encoder in Q1, with scores ranging approximately from −5.8 to −11.2. The negative scores are not a problem because their purpose is to rank candidates, not to represent probabilities. I also observed that the LLM did not simply invent missing rules. With the instruction to answer only from the supplied context, it acknowledged missing information in Q3's baseline answer. This reduced the risk of unsupported claims, but incomplete answers can still be misleading when they sound definitive, as seen in Q4. The control query, Q5, also remained correct in both pipelines: chunk 102, from Recital 68, moved from second to first, without making the answer worse.
 
 ### Limitations observed
-
-✍️ *Write briefly in your own words.*
-
-Notes:
-- Re-ranking only reorders the top 10, so recall is capped by the bi-encoder. Art. 17(3) itself (chunk 329: #7 → #6) and Art. 37(1)(a)/(b) (chunk 391: #5 → #7) never reached the top 3. Q2 was answered from the recital instead, and Q4's Answer 2 is still incomplete.
-- Fixed-size chunks cut lists: Art. 34(3)(c) fell outside chunk 378, so Answer 2 for Q3 lists only (a) and (b).
+Re-ranking cannot recover information that the initial bi-encoder fails to retrieve among its candidates. For example, the relevant text of Article 17(3) remained outside the top three, while the conditions in Article 37(1)(a) and (b) were also missed. The answer to Q2 relied on the recital rather than the article itself, and Q4 remained incomplete. Chunking was another limitation: the 800-character window cut Article 34(3) before its third exception. These issues could be reduced by retrieving more candidates, splitting documents along article and paragraph boundaries, and combining dense retrieval with keyword-based BM25 search.
 
 ---
 
@@ -80,11 +68,7 @@ CPU; 20 runs × 5 queries after a warm-up run. LLM time is the mean of the real 
 | 1 – Baseline | 6.6 ms | – | 6.6 ms | ~1.56 s |
 | 2 – Re-ranking | 6.6 ms | 20.2 ms | 26.8 ms | ~1.76 s |
 
-✍️ *Interpret in 2–3 sentences.*
-
-Notes:
-- Re-ranking makes retrieval ~4× slower, but that's ~1% of the end-to-end time; the LLM call dominates.
-- The LLM difference between rows comes from API/network variance, not from the pipeline.
+I measured latency on the CPU after a warm-up run, using 20 runs for each of the five queries and averaging the results. The re-ranking stage added 20.2 ms, increasing retrieval time from 6.6 ms to 26.8 ms, or roughly four times the baseline retrieval time. However, compared with the full request time of approximately 1.6 seconds, the additional cost was only around 1–1.3%. This suggests that re-ranking can improve answer quality with little noticeable increase in end-to-end latency. The difference between the measured LLM times is attributable to API and network variation, rather than an inherent slowdown caused by re-ranking.
 
 ---
 
@@ -92,9 +76,8 @@ Notes:
 
 Measured: cross-encoding **all 580 chunks** for one query took **886 ms** (~1.5 ms per pair, ~45× the 10-candidate re-rank).
 
-✍️ *Write your explanation in your own words.*
+In the experiment, cross-encoding all 580 chunks for a single query took 886 ms, which works out to approximately 1.5 ms per query–chunk pair. If this cost scaled linearly to a corpus of one million chunks, scoring every chunk would take approximately 25 minutes for a single query. This would be impractical for an interactive question-answering system, especially when multiple users are querying it.
 
-Notes:
-- Cost is linear in corpus size and paid on **every** query. At ~1.5 ms per pair, 1M chunks ≈ 25 minutes per query.
-- Bi-encoder document vectors are built once, offline; query time is one encoding plus an index lookup, and approximate indexes (HNSW/IVF) stay fast at millions of vectors.
-- Two-stage design: the cheap bi-encoder handles recall (narrow to ~10), the expensive cross-encoder handles precision (order those few).
+The bi-encoder avoids this cost by computing document vectors once, offline. At query time, it only needs to encode the query and search the existing vector index. Approximate nearest-neighbour indexes, such as HNSW and IVF, can make this search efficient even for millions of vectors. The key difference is that document representations can be precomputed, whereas query–document relevance scores depend on the query and must be calculated when needed.
+
+For this reason, a two-stage retrieval pipeline is more practical. The bi-encoder first retrieves a small set of potentially relevant candidates, and the cross-encoder carefully re-ranks them. In my experiment, re-ranking ten candidates added only about 20 ms while correcting several important retrieval errors. This provides a useful balance between retrieval speed and answer quality.
